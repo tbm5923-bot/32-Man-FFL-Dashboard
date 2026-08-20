@@ -31,43 +31,30 @@ FILES = {
     "unmatched": "unmatched_roster_players.csv",
 }
 
-# The original compact snapshot is split across these files. One middle chunk
-# (compact_snapshot.bundle09) was lost during the initial GitHub publish, but an
-# earlier repack of the same byte stream remains in snapshot_final.part05/06.
-# We reconstruct only that missing span and still verify the original full hash.
-WEB_SNAPSHOT_PREFIX_FILES = [
-    "compact_snapshot.part00",
-    "compact_snapshot.part01",
-    "compact_snapshot.part02",
-    "compact_snapshot.part03",
-    "compact_snapshot.part04",
-    "compact_snapshot.part050",
-    "compact_snapshot.part051",
-    "compact_snapshot.part060",
-    "compact_snapshot.part061",
-    "compact_snapshot.bundle07",
+WEB_SNAPSHOT_FILES = [
+    "web_snapshot_v7.part000",
+    "web_snapshot_v7.part001",
+    "web_snapshot_v7.part002",
+    "web_snapshot_v7.part003",
+    "web_snapshot_v7.part004",
+    "web_snapshot_v7.part005",
+    "web_snapshot_v7.part006",
+    "web_snapshot_v7.part007",
+    "web_snapshot_v7.part008",
+    "web_snapshot_v7.part009",
+    "web_snapshot_v7.part010",
+    "web_snapshot_v7.part011",
+    "web_snapshot_v7.part012",
+    "web_snapshot_v7.part013",
+    "web_snapshot_v7.part014_015",
+    "web_snapshot_v7.part016_017",
+    "web_snapshot_v7.part018_019",
+    "web_snapshot_v7.part020_021",
+    "web_snapshot_v7.part022_023",
+    "web_snapshot_v7.part024_025",
 ]
-WEB_SNAPSHOT_SUFFIX_FILES = [
-    "compact_snapshot.bundle11",
-    "compact_snapshot.bundle13",
-]
-WEB_SNAPSHOT_RECOVERY_FILES = [
-    "snapshot_final.part05",
-    "snapshot_final.part06",
-]
-WEB_SNAPSHOT_REQUIRED_FILES = (
-    WEB_SNAPSHOT_PREFIX_FILES
-    + WEB_SNAPSHOT_RECOVERY_FILES
-    + WEB_SNAPSHOT_SUFFIX_FILES
-)
-
-WEB_SNAPSHOT_B85_LENGTH = 170250
-WEB_SNAPSHOT_SHA256 = "62a44eda00210892ef1972168702ed418c6a4bb6b5c4d2e227b4ba712ccfda25"
-WEB_SNAPSHOT_RECOVERED_BUNDLE09_LENGTH = 23119
-# snapshot_final.part05 covers encoded offsets 100000:120000. The missing
-# bundle09 starts at encoded offset 100002 and ends at 123121.
-RECOVERY_PART05_START = 2
-RECOVERY_PART06_END = 3121
+WEB_SNAPSHOT_B85_LENGTH = 101375
+WEB_SNAPSHOT_SHA256 = "d24e69a67d3dd2f5ef0bc419a2115763e4061872d7542d75a15fa2bf41cbd051"
 
 ATTRIBUTION_COLUMNS = [
     "week", "sleeper_id", "projected_mean", "direct_model_mean",
@@ -76,12 +63,19 @@ ATTRIBUTION_COLUMNS = [
     "game_env_mult", "weather_mult", "weekly_miss_prob",
 ]
 
+EXPECTED_WEB_ROWS = {
+    "standings": 32,
+    "matchups": 208,
+    "players": 9826,
+    "lineups": 3808,
+    "team_weeks": 544,
+    "playoffs": 32,
+}
 
 @st.cache_data(show_spinner=False)
 def load_csv(path: str, mtime: float) -> pd.DataFrame:
     del mtime
     return pd.read_csv(path)
-
 
 @st.cache_data(show_spinner=False)
 def load_json(path: str, mtime: float) -> dict:
@@ -89,80 +83,64 @@ def load_json(path: str, mtime: float) -> dict:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
-
 @st.cache_data(show_spinner=False)
-def load_compact_snapshot(
-    output_dir: str,
-    signature: tuple[tuple[str, float], ...],
-) -> tuple[dict[str, pd.DataFrame], dict]:
+def load_compact_snapshot(output_dir: str, signature: tuple[tuple[str, float], ...]) -> tuple[dict[str, pd.DataFrame], dict]:
     del signature
     root = Path(output_dir)
-
-    required = [root / name for name in WEB_SNAPSHOT_REQUIRED_FILES]
-    missing_parts = [p.name for p in required if not p.exists()]
+    parts = [root / name for name in WEB_SNAPSHOT_FILES]
+    missing_parts = [p.name for p in parts if not p.exists()]
     if missing_parts:
-        raise RuntimeError(
-            f"MIDA web snapshot is incomplete. Missing: {', '.join(missing_parts)}"
-        )
+        raise RuntimeError(f"MIDA web snapshot is incomplete. Missing: {', '.join(missing_parts)}")
 
-    prefix = "".join(
-        (root / name).read_text(encoding="ascii")
-        for name in WEB_SNAPSHOT_PREFIX_FILES
-    )
-    suffix = "".join(
-        (root / name).read_text(encoding="ascii")
-        for name in WEB_SNAPSHOT_SUFFIX_FILES
-    )
-
-    recovery_part05 = (root / "snapshot_final.part05").read_text(encoding="ascii")
-    recovery_part06 = (root / "snapshot_final.part06").read_text(encoding="ascii")
-    recovered_bundle09 = (
-        recovery_part05[RECOVERY_PART05_START:]
-        + recovery_part06[:RECOVERY_PART06_END]
-    )
-    if len(recovered_bundle09) != WEB_SNAPSHOT_RECOVERED_BUNDLE09_LENGTH:
-        raise RuntimeError(
-            "MIDA web snapshot recovery length mismatch: "
-            f"{len(recovered_bundle09):,} != "
-            f"{WEB_SNAPSHOT_RECOVERED_BUNDLE09_LENGTH:,}"
-        )
-
-    encoded = prefix + recovered_bundle09 + suffix
+    encoded = "".join(p.read_text(encoding="ascii") for p in parts)
     if len(encoded) != WEB_SNAPSHOT_B85_LENGTH:
-        raise RuntimeError(
-            f"MIDA web snapshot length mismatch: {len(encoded):,} != "
-            f"{WEB_SNAPSHOT_B85_LENGTH:,}"
-        )
-
+        raise RuntimeError(f"MIDA web snapshot length mismatch: {len(encoded):,} != {WEB_SNAPSHOT_B85_LENGTH:,}")
     digest = hashlib.sha256(encoded.encode("ascii")).hexdigest()
     if digest != WEB_SNAPSHOT_SHA256:
-        raise RuntimeError(
-            "MIDA web snapshot checksum mismatch; refusing to load partial/corrupt data."
-        )
+        raise RuntimeError("MIDA web snapshot checksum mismatch; refusing to load corrupt data.")
 
-    payload = lzma.decompress(base64.b85decode(encoded.encode("ascii")))
-    snapshot = pickle.loads(payload)
+    try:
+        payload = lzma.decompress(base64.b85decode(encoded.encode("ascii")))
+        snapshot = pickle.loads(payload)
+    except Exception as exc:
+        raise RuntimeError(f"MIDA web snapshot could not be decoded: {type(exc).__name__}: {exc}") from exc
+
+    if not isinstance(snapshot, dict) or "data" not in snapshot or "meta" not in snapshot:
+        raise RuntimeError("MIDA web snapshot has an invalid top-level structure.")
     data = snapshot["data"]
     meta = snapshot["meta"]
+    scales = snapshot.get("scales", {})
+    if not isinstance(data, dict):
+        raise RuntimeError("MIDA web snapshot data payload is invalid.")
+
+    # Web snapshot stores display/model floats as scaled integers to keep the
+    # deployment payload small. Rehydrate them before the UI consumes them.
+    for table, column_scales in scales.items():
+        frame = data.get(table)
+        if not isinstance(frame, pd.DataFrame):
+            continue
+        for column, scale in column_scales.items():
+            if column in frame.columns:
+                frame[column] = frame[column].astype("float64") / float(scale)
+
+    for key, expected_rows in EXPECTED_WEB_ROWS.items():
+        frame = data.get(key)
+        if not isinstance(frame, pd.DataFrame):
+            raise RuntimeError(f"MIDA web snapshot is missing required table: {key}")
+        if len(frame) != expected_rows:
+            raise RuntimeError(f"MIDA web snapshot row-count mismatch for {key}: {len(frame):,} != {expected_rows:,}")
 
     players = data.get("players", pd.DataFrame())
     if not players.empty:
-        data["attribution"] = players[
-            [c for c in ATTRIBUTION_COLUMNS if c in players.columns]
-        ].copy()
+        data["attribution"] = players[[c for c in ATTRIBUTION_COLUMNS if c in players.columns]].copy()
     else:
         data["attribution"] = pd.DataFrame()
-
     return data, meta
 
-
-def load_outputs(
-    output_dir: Path = DEFAULT_OUTPUT_DIR,
-) -> tuple[dict[str, pd.DataFrame], dict, list[str]]:
+def load_outputs(output_dir: Path = DEFAULT_OUTPUT_DIR) -> tuple[dict[str, pd.DataFrame], dict, list[str]]:
     data: dict[str, pd.DataFrame] = {}
     missing: list[str] = []
 
-    # Local engine mode: canonical MIDA output files take precedence.
     if (output_dir / "standings_projection.csv").exists():
         for key, name in FILES.items():
             p = output_dir / name
@@ -171,29 +149,21 @@ def load_outputs(
             else:
                 data[key] = pd.DataFrame()
                 missing.append(name)
-
         attr_path = output_dir / "projection_attribution.csv"
-        data["attribution"] = (
-            load_csv(str(attr_path), attr_path.stat().st_mtime)
-            if attr_path.exists()
-            else pd.DataFrame()
-        )
+        data["attribution"] = load_csv(str(attr_path), attr_path.stat().st_mtime) if attr_path.exists() else pd.DataFrame()
         if not attr_path.exists():
             missing.append("projection_attribution.csv")
-
         meta_path = output_dir / "run_metadata.json"
         if meta_path.exists():
             meta = load_json(str(meta_path), meta_path.stat().st_mtime)
         else:
             meta = {}
             missing.append("run_metadata.json")
-
         return data, meta, missing
 
-    # Web mode: reconstruct the frozen compact forecast snapshot.
-    required = [output_dir / name for name in WEB_SNAPSHOT_REQUIRED_FILES]
-    if all(p.exists() for p in required):
-        sig = tuple((p.name, p.stat().st_mtime) for p in required)
+    parts = [output_dir / name for name in WEB_SNAPSHOT_FILES]
+    if all(p.exists() for p in parts):
+        sig = tuple((p.name, p.stat().st_mtime) for p in parts)
         data, meta = load_compact_snapshot(str(output_dir), sig)
         for key in list(FILES) + ["attribution"]:
             if key not in data:
@@ -206,7 +176,6 @@ def load_outputs(
     missing.extend(FILES.values())
     missing.extend(["projection_attribution.csv", "run_metadata.json"])
     return data, {}, missing
-
 
 def clear_cache() -> None:
     st.cache_data.clear()
