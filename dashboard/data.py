@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import base64
+import hashlib
 import json
 import lzma
 import pickle
@@ -30,6 +31,24 @@ FILES = {
     "unmatched": "unmatched_roster_players.csv",
 }
 
+WEB_SNAPSHOT_FILES = [
+    "compact_snapshot.part00",
+    "compact_snapshot.part01",
+    "compact_snapshot.part02",
+    "compact_snapshot.part03",
+    "compact_snapshot.part04",
+    "compact_snapshot.part050",
+    "compact_snapshot.part051",
+    "compact_snapshot.part060",
+    "compact_snapshot.part061",
+    "compact_snapshot.bundle07",
+    "compact_snapshot.bundle09",
+    "compact_snapshot.bundle11",
+    "compact_snapshot.bundle13",
+]
+WEB_SNAPSHOT_B85_LENGTH = 170250
+WEB_SNAPSHOT_SHA256 = "62a44eda00210892ef1972168702ed418c6a4bb6b5c4d2e227b4ba712ccfda25"
+
 ATTRIBUTION_COLUMNS = [
     "week", "sleeper_id", "projected_mean", "direct_model_mean",
     "oppeff_model_mean", "ecr_prior_ppg", "market_weight",
@@ -55,8 +74,18 @@ def load_json(path: str, mtime: float) -> dict:
 def load_compact_snapshot(output_dir: str, signature: tuple[tuple[str, float], ...]) -> tuple[dict[str, pd.DataFrame], dict]:
     del signature
     root = Path(output_dir)
-    parts = sorted(root.glob("compact_snapshot.part*"))
+    parts = [root / name for name in WEB_SNAPSHOT_FILES]
+    missing_parts = [p.name for p in parts if not p.exists()]
+    if missing_parts:
+        raise RuntimeError(f"MIDA web snapshot is incomplete. Missing: {', '.join(missing_parts)}")
     encoded = "".join(p.read_text(encoding="ascii") for p in parts)
+    if len(encoded) != WEB_SNAPSHOT_B85_LENGTH:
+        raise RuntimeError(
+            f"MIDA web snapshot length mismatch: {len(encoded):,} != {WEB_SNAPSHOT_B85_LENGTH:,}"
+        )
+    digest = hashlib.sha256(encoded.encode("ascii")).hexdigest()
+    if digest != WEB_SNAPSHOT_SHA256:
+        raise RuntimeError("MIDA web snapshot checksum mismatch; refusing to load partial/corrupt data.")
     payload = lzma.decompress(base64.b85decode(encoded.encode("ascii")))
     snapshot = pickle.loads(payload)
     data = snapshot["data"]
@@ -95,8 +124,8 @@ def load_outputs(output_dir: Path = DEFAULT_OUTPUT_DIR) -> tuple[dict[str, pd.Da
         return data, meta, missing
 
     # Web mode: reconstruct the frozen, compact forecast snapshot.
-    parts = sorted(output_dir.glob("compact_snapshot.part*"))
-    if parts:
+    parts = [output_dir / name for name in WEB_SNAPSHOT_FILES]
+    if all(p.exists() for p in parts):
         sig = tuple((p.name, p.stat().st_mtime) for p in parts)
         data, meta = load_compact_snapshot(str(output_dir), sig)
         for key in list(FILES) + ["attribution"]:
