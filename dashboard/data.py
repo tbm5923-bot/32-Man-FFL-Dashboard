@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from io import BytesIO, StringIO
 from pathlib import Path
 import base64
 import json
 import lzma
-import tarfile
+import pickle
 
 import pandas as pd
 import streamlit as st
@@ -26,11 +25,17 @@ FILES = {
     "ablation": "ablation_results.csv",
     "calibration": "calibration_curve.csv",
     "features": "feature_activation.csv",
-    "attribution": "projection_attribution.csv",
     "fragility": "roster_fragility.csv",
     "manager": "manager_efficiency.csv",
     "unmatched": "unmatched_roster_players.csv",
 }
+
+ATTRIBUTION_COLUMNS = [
+    "week", "sleeper_id", "projected_mean", "direct_model_mean",
+    "oppeff_model_mean", "ecr_prior_ppg", "market_weight",
+    "team_volume_mult", "team_budget_mult", "opp_mult", "trait_opp_mult",
+    "game_env_mult", "weather_mult", "weekly_miss_prob",
+]
 
 
 @st.cache_data(show_spinner=False)
@@ -47,30 +52,29 @@ def load_json(path: str, mtime: float) -> dict:
 
 
 @st.cache_data(show_spinner=False)
-def load_web_snapshot(output_dir: str, signature: tuple[tuple[str, float], ...]) -> tuple[dict[str, bytes], dict]:
+def load_compact_snapshot(output_dir: str, signature: tuple[tuple[str, float], ...]) -> tuple[dict[str, pd.DataFrame], dict]:
     del signature
     root = Path(output_dir)
-    parts = sorted(root.glob("web_snapshot.part*"))
+    parts = sorted(root.glob("compact_snapshot.part*"))
     encoded = "".join(p.read_text(encoding="ascii") for p in parts)
-    tar_bytes = lzma.decompress(base64.b85decode(encoded.encode("ascii")))
-    raw: dict[str, bytes] = {}
-    with tarfile.open(fileobj=BytesIO(tar_bytes), mode="r:") as tf:
-        for member in tf.getmembers():
-            if member.isfile():
-                f = tf.extractfile(member)
-                if f is not None:
-                    raw[member.name] = f.read()
-    meta = json.loads(raw.get("run_metadata.json", b"{}").decode("utf-8"))
-    return raw, meta
+    payload = lzma.decompress(base64.b85decode(encoded.encode("ascii")))
+    snapshot = pickle.loads(payload)
+    data = snapshot["data"]
+    meta = snapshot["meta"]
+    players = data.get("players", pd.DataFrame())
+    if not players.empty:
+        data["attribution"] = players[[c for c in ATTRIBUTION_COLUMNS if c in players.columns]].copy()
+    else:
+        data["attribution"] = pd.DataFrame()
+    return data, meta
 
 
 def load_outputs(output_dir: Path = DEFAULT_OUTPUT_DIR) -> tuple[dict[str, pd.DataFrame], dict, list[str]]:
     data: dict[str, pd.DataFrame] = {}
     missing: list[str] = []
 
-    # Local-engine mode: prefer canonical CSV/JSON files when present.
-    canonical_present = (output_dir / "standings_projection.csv").exists()
-    if canonical_present:
+    # Local engine mode: canonical MIDA output files take precedence.
+    if (output_dir / "standings_projection.csv").exists():
         for key, name in FILES.items():
             p = output_dir / name
             if p.exists():
@@ -78,6 +82,10 @@ def load_outputs(output_dir: Path = DEFAULT_OUTPUT_DIR) -> tuple[dict[str, pd.Da
             else:
                 data[key] = pd.DataFrame()
                 missing.append(name)
+        attr_path = output_dir / "projection_attribution.csv"
+        data["attribution"] = load_csv(str(attr_path), attr_path.stat().st_mtime) if attr_path.exists() else pd.DataFrame()
+        if not attr_path.exists():
+            missing.append("projection_attribution.csv")
         meta_path = output_dir / "run_metadata.json"
         if meta_path.exists():
             meta = load_json(str(meta_path), meta_path.stat().st_mtime)
@@ -86,26 +94,21 @@ def load_outputs(output_dir: Path = DEFAULT_OUTPUT_DIR) -> tuple[dict[str, pd.Da
             missing.append("run_metadata.json")
         return data, meta, missing
 
-    # Web mode: load the compact frozen snapshot committed with the app.
-    parts = sorted(output_dir.glob("web_snapshot.part*"))
+    # Web mode: reconstruct the frozen, compact forecast snapshot.
+    parts = sorted(output_dir.glob("compact_snapshot.part*"))
     if parts:
         sig = tuple((p.name, p.stat().st_mtime) for p in parts)
-        raw, meta = load_web_snapshot(str(output_dir), sig)
-        for key, name in FILES.items():
-            payload = raw.get(name)
-            if payload is None:
+        data, meta = load_compact_snapshot(str(output_dir), sig)
+        for key in list(FILES) + ["attribution"]:
+            if key not in data:
                 data[key] = pd.DataFrame()
-                missing.append(name)
-            else:
-                data[key] = pd.read_csv(StringIO(payload.decode("utf-8")))
-        if "run_metadata.json" not in raw:
-            missing.append("run_metadata.json")
+                missing.append(key)
         return data, meta, missing
 
-    for key in FILES:
+    for key in list(FILES) + ["attribution"]:
         data[key] = pd.DataFrame()
     missing.extend(FILES.values())
-    missing.append("run_metadata.json")
+    missing.extend(["projection_attribution.csv", "run_metadata.json"])
     return data, {}, missing
 
 
