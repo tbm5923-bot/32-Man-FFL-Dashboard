@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 import base64
-import hashlib
 import json
 import lzma
 import pickle
@@ -31,23 +30,20 @@ FILES = {
     "unmatched": "unmatched_roster_players.csv",
 }
 
+# Frozen web snapshot bundled with the deployment repository. These files were
+# already present together on streamlit-deploy-v1 and avoid the incomplete
+# compact_snapshot manifest that referenced a missing bundle09 file.
 WEB_SNAPSHOT_FILES = [
-    "compact_snapshot.part00",
-    "compact_snapshot.part01",
-    "compact_snapshot.part02",
-    "compact_snapshot.part03",
-    "compact_snapshot.part04",
-    "compact_snapshot.part050",
-    "compact_snapshot.part051",
-    "compact_snapshot.part060",
-    "compact_snapshot.part061",
-    "compact_snapshot.bundle07",
-    "compact_snapshot.bundle09",
-    "compact_snapshot.bundle11",
-    "compact_snapshot.bundle13",
+    "snapshot_final.part00",
+    "snapshot_final.part01",
+    "snapshot_final.part02",
+    "snapshot_final.part03",
+    "snapshot_final.part04",
+    "snapshot_final.part05",
+    "snapshot_final.part06",
+    "snapshot_final.part07",
 ]
-WEB_SNAPSHOT_B85_LENGTH = 170250
-WEB_SNAPSHOT_SHA256 = "62a44eda00210892ef1972168702ed418c6a4bb6b5c4d2e227b4ba712ccfda25"
+WEB_SNAPSHOT_B85_LENGTH = 169981
 
 ATTRIBUTION_COLUMNS = [
     "week", "sleeper_id", "projected_mean", "direct_model_mean",
@@ -55,6 +51,15 @@ ATTRIBUTION_COLUMNS = [
     "team_volume_mult", "team_budget_mult", "opp_mult", "trait_opp_mult",
     "game_env_mult", "weather_mult", "weekly_miss_prob",
 ]
+
+EXPECTED_WEB_ROWS = {
+    "standings": 32,
+    "matchups": 208,
+    "players": 9826,
+    "lineups": 3808,
+    "team_weeks": 544,
+    "playoffs": 32,
+}
 
 
 @st.cache_data(show_spinner=False)
@@ -78,23 +83,42 @@ def load_compact_snapshot(output_dir: str, signature: tuple[tuple[str, float], .
     missing_parts = [p.name for p in parts if not p.exists()]
     if missing_parts:
         raise RuntimeError(f"MIDA web snapshot is incomplete. Missing: {', '.join(missing_parts)}")
+
     encoded = "".join(p.read_text(encoding="ascii") for p in parts)
     if len(encoded) != WEB_SNAPSHOT_B85_LENGTH:
         raise RuntimeError(
             f"MIDA web snapshot length mismatch: {len(encoded):,} != {WEB_SNAPSHOT_B85_LENGTH:,}"
         )
-    digest = hashlib.sha256(encoded.encode("ascii")).hexdigest()
-    if digest != WEB_SNAPSHOT_SHA256:
-        raise RuntimeError("MIDA web snapshot checksum mismatch; refusing to load partial/corrupt data.")
-    payload = lzma.decompress(base64.b85decode(encoded.encode("ascii")))
-    snapshot = pickle.loads(payload)
+
+    try:
+        payload = lzma.decompress(base64.b85decode(encoded.encode("ascii")))
+        snapshot = pickle.loads(payload)
+    except Exception as exc:
+        raise RuntimeError(f"MIDA web snapshot could not be decoded: {type(exc).__name__}: {exc}") from exc
+
+    if not isinstance(snapshot, dict) or "data" not in snapshot or "meta" not in snapshot:
+        raise RuntimeError("MIDA web snapshot has an invalid top-level structure.")
+
     data = snapshot["data"]
     meta = snapshot["meta"]
+    if not isinstance(data, dict):
+        raise RuntimeError("MIDA web snapshot data payload is invalid.")
+
+    for key, expected_rows in EXPECTED_WEB_ROWS.items():
+        frame = data.get(key)
+        if not isinstance(frame, pd.DataFrame):
+            raise RuntimeError(f"MIDA web snapshot is missing required table: {key}")
+        if len(frame) != expected_rows:
+            raise RuntimeError(
+                f"MIDA web snapshot row-count mismatch for {key}: {len(frame):,} != {expected_rows:,}"
+            )
+
     players = data.get("players", pd.DataFrame())
     if not players.empty:
         data["attribution"] = players[[c for c in ATTRIBUTION_COLUMNS if c in players.columns]].copy()
     else:
         data["attribution"] = pd.DataFrame()
+
     return data, meta
 
 
@@ -123,7 +147,7 @@ def load_outputs(output_dir: Path = DEFAULT_OUTPUT_DIR) -> tuple[dict[str, pd.Da
             missing.append("run_metadata.json")
         return data, meta, missing
 
-    # Web mode: reconstruct the frozen, compact forecast snapshot.
+    # Web mode: reconstruct the frozen forecast snapshot bundled with the repo.
     parts = [output_dir / name for name in WEB_SNAPSHOT_FILES]
     if all(p.exists() for p in parts):
         sig = tuple((p.name, p.stat().st_mtime) for p in parts)
