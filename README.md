@@ -7,7 +7,7 @@ This repository is the **web/dashboard layer only**. It reads a frozen forecast 
 ## Current snapshot
 
 - Engine: MIDA v0.6.2
-- Season: 2026 preseason
+- Season: 2026, through Week 1
 - Simulations: 20,000
 - Regular season: Weeks 1–13
 - Playoffs: Weeks 14–17
@@ -64,3 +64,7 @@ MIDA forecasting engine (private/local)
 ### Deployment data note
 
 The frozen web forecast is stored as a compact, losslessly compressed snapshot split into GitHub-safe text chunks. The dashboard loader reconstructs it in memory; the underlying MIDA engine outputs remain unchanged.
+
+### September 15 IDP repair snapshot
+
+Missing IDP market priors use the dated August 9 backup while valid live priors are retained. Per-player provenance and coverage counts are recorded in the snapshot. The dashboard structure is unchanged.

@@ -32,29 +32,26 @@ FILES = {
 }
 
 WEB_SNAPSHOT_FILES = [
-    "web_snapshot_v7.part000",
-    "web_snapshot_v7.part001",
-    "web_snapshot_v7.part002",
-    "web_snapshot_v7.part003",
-    "web_snapshot_v7.part004",
-    "web_snapshot_v7.part005",
-    "web_snapshot_v7.part006",
-    "web_snapshot_v7.part007",
-    "web_snapshot_v7.part008",
-    "web_snapshot_v7.part009",
-    "web_snapshot_v7.part010",
-    "web_snapshot_v7.part011",
-    "web_snapshot_v7.part012",
-    "web_snapshot_v7.part013",
-    "web_snapshot_v7.part014_015",
-    "web_snapshot_v7.part016_017",
-    "web_snapshot_v7.part018_019",
-    "web_snapshot_v7.part020_021",
-    "web_snapshot_v7.part022_023",
-    "web_snapshot_v7.part024_025",
+    "web_snapshot_20260915.part000",
+    "web_snapshot_20260915.part001",
+    "web_snapshot_20260915.part002",
+    "web_snapshot_20260915.part003",
+    "web_snapshot_20260915.part004",
+    "web_snapshot_20260915.part005",
+    "web_snapshot_20260915.part006",
+    "web_snapshot_20260915.part007",
+    "web_snapshot_20260915.part008",
+    "web_snapshot_20260915.part009",
+    "web_snapshot_20260915.part010",
+    "web_snapshot_20260915.part011",
+    "web_snapshot_20260915.part012",
+    "web_snapshot_20260915.part013",
+    "web_snapshot_20260915.part014",
+    "web_snapshot_20260915.part015",
+    "web_snapshot_20260915.part016"
 ]
-WEB_SNAPSHOT_B85_LENGTH = 101375
-WEB_SNAPSHOT_SHA256 = "d24e69a67d3dd2f5ef0bc419a2115763e4061872d7542d75a15fa2bf41cbd051"
+WEB_SNAPSHOT_B85_LENGTH = 256385
+WEB_SNAPSHOT_SHA256 = "b09e36b8e77aa91e7233e52c86bb3977df83fe354e20debb45a03cdfcee00bea"
 
 ATTRIBUTION_COLUMNS = [
     "week", "sleeper_id", "projected_mean", "direct_model_mean",
@@ -66,10 +63,10 @@ ATTRIBUTION_COLUMNS = [
 EXPECTED_WEB_ROWS = {
     "standings": 32,
     "matchups": 208,
-    "players": 9826,
+    "players": 9180,
     "lineups": 3808,
     "team_weeks": 544,
-    "playoffs": 32,
+    "playoffs": 32
 }
 
 @st.cache_data(show_spinner=False)
